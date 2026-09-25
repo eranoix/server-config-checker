@@ -212,7 +212,7 @@ cmdline=$*
 write_owner "" || { say "could not record the owner of lock $name; command NOT run"; rmdir "$L" 2>/dev/null; exit 2; }
 
 child=
-# shellcheck disable=SC2329 # invoked by the trap below
+# shellcheck disable=SC2317,SC2329 # invoked by the trap below (SC2317 is the same warning in shellcheck 0.9)
 on_signal() {
   [ -n "$child" ] && kill "$child" 2>/dev/null
   release
