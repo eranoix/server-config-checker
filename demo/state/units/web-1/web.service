@@ -1,0 +1,12 @@
+[Unit]
+Description=Example web application
+After=network-online.target
+
+[Service]
+EnvironmentFile=/etc/app/web.env
+ExecStart=/usr/local/bin/app serve --port 8080
+User=app
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

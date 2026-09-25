@@ -1,0 +1,12 @@
+[Unit]
+Description=Example background worker
+After=network-online.target
+
+[Service]
+EnvironmentFile=/etc/app/worker.env
+ExecStart=/usr/local/bin/app worker --config /etc/app/worker.conf
+User=app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

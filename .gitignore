@@ -1,0 +1,2 @@
+# nothing generated lives in the tree: tests and the demo work in mktemp dirs
+*.bak

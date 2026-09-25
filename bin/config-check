@@ -1,0 +1,143 @@
+#!/bin/sh
+# config-check: compare declared state with live hosts, read-only.
+#
+# usage: config-check [-s STATE_DIR] [-i INVENTORY] [-c CHECKS] [-q] [HOST...]
+#
+#   -s  state directory (default ./state). Holds files/, units/, envkeys/.
+#   -i  inventory file  (default STATE_DIR/inventory.tsv)
+#   -c  checks file     (default STATE_DIR/checks.tsv)
+#   -q  only print failures and the summary
+#   HOST  limit the run to these hosts
+#
+# Environment:
+#   DRIFT_SSH_KEY       private key for ssh (optional)
+#   DRIFT_KNOWN_HOSTS   known_hosts file; when set, host keys are enforced
+#   DRIFT_SSH_OPTS      extra ssh options, split on spaces
+#   DRIFT_SSH_TIMEOUT   connect timeout in seconds (default 5)
+#   DRIFT_COLOR         always | never | auto (default auto, honours NO_COLOR)
+#
+# Exit: 0 no drift · 1 drift found · 2 a check could not run, or usage error.
+# An unreachable host is never a pass: the run is incomplete, so it exits 2.
+
+set -u
+
+DRIFT_LIB=$(cd "$(dirname "$0")/../lib" && pwd) || exit 2
+# shellcheck source=../lib/common.sh
+. "$DRIFT_LIB/common.sh"
+
+usage() {
+  sed -n '3,9s/^# \{0,1\}//p' "$0" >&2
+  exit 2
+}
+
+DRIFT_STATE=./state
+DRIFT_INVENTORY=
+checks=
+quiet=0
+while getopts s:i:c:qh opt; do
+  case $opt in
+    s) DRIFT_STATE=$OPTARG ;;
+    i) DRIFT_INVENTORY=$OPTARG ;;
+    c) checks=$OPTARG ;;
+    q) quiet=1 ;;
+    *) usage ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+[ -d "$DRIFT_STATE" ] || die "state directory not found: $DRIFT_STATE"
+DRIFT_STATE=$(cd "$DRIFT_STATE" && pwd)
+: "${DRIFT_INVENTORY:=$DRIFT_STATE/inventory.tsv}"
+: "${checks:=$DRIFT_STATE/checks.tsv}"
+[ -f "$DRIFT_INVENTORY" ] || die "inventory not found: $DRIFT_INVENTORY"
+[ -f "$checks" ] || die "checks file not found: $checks"
+for h in "$@"; do
+  valid_host "$h" || die "invalid host name: $h"
+done
+export DRIFT_STATE DRIFT_INVENTORY DRIFT_LIB
+
+for mod in "$DRIFT_LIB"/checks/*.sh; do
+  # shellcheck source=/dev/null
+  . "$mod"
+done
+
+DRIFT_TMP=$(mktemp -d "${TMPDIR:-/tmp}/config-check.XXXXXX") || die "mktemp failed"
+trap 'rm -rf "$DRIFT_TMP"' EXIT
+trap 'exit 2' INT TERM
+
+case ${DRIFT_COLOR:-auto} in
+  always) color=1 ;;
+  never) color=0 ;;
+  *) if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then color=1; else color=0; fi ;;
+esac
+if [ "$color" -eq 1 ]; then
+  esc=$(printf '\033')
+  c_ok="${esc}[32m" c_bad="${esc}[31m" c_err="${esc}[33m" c_off="${esc}[0m"
+else
+  c_ok='' c_bad='' c_err='' c_off=''
+fi
+
+wanted() {
+  [ $# -eq 1 ] && return 0
+  _w=$1
+  shift
+  for _x in "$@"; do
+    [ "$_x" = "$_w" ] && return 0
+  done
+  return 1
+}
+
+pass=0 fail=0 err=0 total=0
+# The loop reads the checks file on fd 3 so nothing the checks run can eat it.
+while read -r host kind target expect rest <&3; do
+  case $host in '' | '#'*) continue ;; esac
+  wanted "$host" "$@" || continue
+  total=$((total + 1))
+
+  label=$(printf '%-9s %-8s %s' "$host" "$kind" "$target")
+  out="$DRIFT_TMP/detail"
+  if ! valid_host "$host"; then
+    echo "invalid host name" >"$out"
+    rc=2
+  elif ! command -v "check_$kind" >/dev/null 2>&1; then
+    echo "unknown check kind: $kind" >"$out"
+    rc=2
+  elif [ -n "$rest" ]; then
+    echo "too many columns" >"$out"
+    rc=2
+  else
+    "check_$kind" "$host" "$target" "${expect:--}" >"$out" 2>&1
+    rc=$?
+  fi
+
+  case $rc in
+    0)
+      pass=$((pass + 1))
+      [ "$quiet" -eq 1 ] || printf '%sPASS%s  %s\n' "$c_ok" "$c_off" "$label"
+      ;;
+    1)
+      fail=$((fail + 1))
+      printf '%sFAIL%s  %s\n' "$c_bad" "$c_off" "$label"
+      indent <"$out"
+      ;;
+    *)
+      err=$((err + 1))
+      printf '%sERROR%s %s\n' "$c_err" "$c_off" "$label"
+      indent <"$out"
+      ;;
+  esac
+done 3<"$checks"
+
+[ "$total" -gt 0 ] || die "no checks matched"
+
+printf '\n%s checks: %s passed, %s drifted, %s could not run\n' "$total" "$pass" "$fail" "$err"
+if [ "$err" -gt 0 ]; then
+  echo "result: INCOMPLETE (a check that did not run is not a pass)"
+  exit 2
+fi
+if [ "$fail" -gt 0 ]; then
+  echo "result: DRIFT"
+  exit 1
+fi
+echo "result: OK, live state matches the repository"
+exit 0

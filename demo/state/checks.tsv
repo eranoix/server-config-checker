@@ -1,0 +1,8 @@
+# host      kind      target                         expect
+web-1       file      /etc/nginx/http.d/site.conf    0644
+web-1       envkeys   /etc/app/web.env               -
+web-1       unit      web.service                    enabled
+worker-1    file      /etc/app/worker.conf           0644
+worker-1    envkeys   /etc/app/worker.env            -
+worker-1    unit      worker.service                 enabled
+worker-1    unit      cleanup.timer                  enabled

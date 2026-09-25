@@ -1,0 +1,177 @@
+#!/bin/sh
+# drift-queue: a FIFO merge queue for concurrent changes to the declared state.
+#
+# usage:
+#   drift-queue [-r REPO] [-b TARGET] submit BRANCH   take a ticket, join the queue
+#   drift-queue [-r REPO] list                         show pending tickets in order
+#   drift-queue [-r REPO] [-b TARGET] run              merge every pending ticket
+#
+#   -r  repository (default: current directory)
+#   -b  branch that receives the merges (default: main)
+#
+# Environment:
+#   DRIFT_QUEUE_GATE  command that must pass after each merge
+#                     (default: make check). It runs in the repository.
+#
+# Rules, and why:
+#   1. Order is ticket order. A ticket number is taken under the short `queue`
+#      lock, so concurrent submitters always get distinct, increasing numbers
+#      and the queue is first come, first merged.
+#   2. One merge at a time, under the `merge` lock. Every merge is --no-ff so
+#      the history records which ticket passed the gate, in which order.
+#   3. A red gate (or a conflict) REJECTS the ticket and puts the target back
+#      exactly where it was. Nothing is fixed inside a merge. The next ticket
+#      still gets its turn; a broken neighbour must not block the line.
+#   4. A merge interrupted by a crash is detected on the next run (an
+#      `inflight` record survives it), the target is reset to the recorded
+#      commit, and the ticket keeps its place at the head of the queue.
+#
+# Exit: 0 all merged (or nothing to do) · 1 some ticket rejected · 2 usage,
+# dirty tree, wrong branch or lock not obtained.
+
+set -u
+
+bindir=$(cd "$(dirname "$0")" && pwd) || exit 2
+repo=.
+target=main
+while getopts r:b: opt; do
+  case $opt in
+    r) repo=$OPTARG ;;
+    b) target=$OPTARG ;;
+    *) sed -n '3,10s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+  esac
+done
+shift $((OPTIND - 1))
+cmd=${1:-}
+[ -n "$cmd" ] || { sed -n '3,10s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+shift
+
+say() { printf 'drift-queue: %s\n' "$*" >&2; }
+fail() { say "$*"; exit 2; }
+
+# Scripts started from a git hook inherit GIT_DIR and GIT_WORK_TREE, which
+# override -C. Drop them so the queue always acts on the repository it was
+# given.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+g() { git -C "$repo" "$@"; }
+
+g rev-parse --git-dir >/dev/null 2>&1 || fail "not a git repository: $repo"
+common=$(g rev-parse --git-common-dir) || exit 2
+case $common in /*) ;; *) common="$(cd "$repo" && pwd)/$common" ;; esac
+# The queue lives in the COMMON git dir, so every worktree sees the same line.
+Q="$common/drift-queue"
+mkdir -p "$Q/pending" "$Q/done" "$Q/rejected" "$Q/locks" || exit 2
+DRIFT_LOCK_DIR="$Q/locks"
+export DRIFT_LOCK_DIR
+
+valid_branch() {
+  case $1 in
+    '' | -* | *..* | *[!A-Za-z0-9._/-]*) return 1 ;;
+  esac
+  git check-ref-format --branch "$1" >/dev/null 2>&1
+}
+
+# Pending tickets, oldest first. Names are zero-padded numbers, so the glob's
+# sorted expansion is ticket order.
+pending() {
+  for _f in "$Q/pending"/[0-9]*; do
+    [ -e "$_f" ] && echo "${_f##*/}"
+  done
+}
+
+case $cmd in
+  submit)
+    [ $# -eq 1 ] || fail "usage: drift-queue submit BRANCH"
+    b=$1
+    valid_branch "$b" || fail "invalid branch name: $b"
+    g rev-parse --verify --quiet "refs/heads/$b" >/dev/null || fail "no such branch: $b"
+    exec "$bindir/drift-lock" -t 30 queue -- "$0" -r "$repo" _submit "$b"
+    ;;
+
+  _submit)
+    # Runs under the `queue` lock.
+    b=$1
+    for f in $(pending); do
+      [ "$(sed -n 1p "$Q/pending/$f")" = "$b" ] && fail "branch $b is already queued as #${f%%-*}"
+    done
+    n=$(cat "$Q/seq" 2>/dev/null || echo 0)
+    n=$((n + 1))
+    t=$(printf '%06d' "$n")
+    printf '%s\n%s\n' "$b" "$(date +%s)" >"$Q/pending/.$t.tmp"
+    mv "$Q/pending/.$t.tmp" "$Q/pending/$t"
+    echo "$n" >"$Q/seq.tmp" && mv "$Q/seq.tmp" "$Q/seq"
+    echo "queued #$n $b"
+    ;;
+
+  list)
+    for f in $(pending); do
+      printf '#%s %s\n' "$(echo "$f" | sed 's/^0*//')" "$(sed -n 1p "$Q/pending/$f")"
+    done
+    ;;
+
+  run)
+    exec "$bindir/drift-lock" -t "${DRIFT_QUEUE_WAIT:-600}" merge -- "$0" -r "$repo" -b "$target" _run
+    ;;
+
+  _run)
+    # Runs under the `merge` lock: nobody else is merging.
+    gate=${DRIFT_QUEUE_GATE:-make check}
+    cur=$(g rev-parse --abbrev-ref HEAD)
+    [ "$cur" = "$target" ] || fail "repository is on $cur, expected $target"
+
+    if [ -f "$Q/inflight" ]; then
+      t=$(sed -n 1p "$Q/inflight")
+      prev=$(sed -n 2p "$Q/inflight")
+      say "found an interrupted merge of #$(echo "$t" | sed 's/^0*//'), resetting $target to ${prev%"${prev#???????}"}"
+      g merge --abort >/dev/null 2>&1
+      g reset -q --hard "$prev" || fail "could not reset to $prev"
+      rm -f "$Q/inflight"
+    fi
+
+    # Only tracked changes count as dirty: the gate may write untracked
+    # artifacts, and those must not make the next run refuse to start.
+    [ -z "$(g status --porcelain --untracked-files=no)" ] || fail "tracked files have uncommitted changes in $repo"
+
+    rejected=0
+    merged=0
+    while :; do
+      t=$(pending | sed -n 1p)
+      [ -n "$t" ] || break
+      b=$(sed -n 1p "$Q/pending/$t")
+      n=$(echo "$t" | sed 's/^0*//')
+      prev=$(g rev-parse HEAD)
+      printf '%s\n%s\n' "$t" "$prev" >"$Q/inflight"
+
+      reason=
+      if ! g rev-parse --verify --quiet "refs/heads/$b" >/dev/null; then
+        reason="branch disappeared"
+      elif ! g merge --no-ff --no-edit -q -m "queue #$n: merge $b" "$b" >/dev/null 2>&1; then
+        g merge --abort >/dev/null 2>&1
+        reason="merge conflict"
+      elif ! (cd "$repo" && sh -c "$gate") >"$Q/gate.log" 2>&1; then
+        reason="gate failed: $gate (last lines below)"
+      fi
+
+      if [ -z "$reason" ]; then
+        echo "merged #$n $b"
+        printf '%s %s %s\n' "$t" "$b" "$(g rev-parse HEAD)" >>"$Q/done.log"
+        mv "$Q/pending/$t" "$Q/done/$t"
+        merged=$((merged + 1))
+      else
+        g reset -q --hard "$prev"
+        echo "REJECTED #$n $b: $reason"
+        case $reason in gate*) tail -n 5 "$Q/gate.log" | sed 's/^/    /' ;; esac
+        printf '%s\n' "$reason" >>"$Q/pending/$t"
+        mv "$Q/pending/$t" "$Q/rejected/$t"
+        rejected=$((rejected + 1))
+      fi
+      rm -f "$Q/inflight"
+    done
+    echo "queue done: $merged merged, $rejected rejected"
+    [ "$rejected" -eq 0 ]
+    ;;
+
+  *)
+    fail "unknown command: $cmd"
+    ;;
+esac

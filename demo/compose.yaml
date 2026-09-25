@@ -1,0 +1,31 @@
+# Two throwaway hosts and a control node. Started by demo/demo.sh with a
+# unique project name, and removed (containers, network, images) at the end.
+services:
+  web-1:
+    build:
+      context: .
+      dockerfile: host/Dockerfile
+      args: { HOST: web-1 }
+    hostname: web-1
+    volumes:
+      - ${DEMO_KEYS:?}/web-1:/keys:ro
+
+  worker-1:
+    build:
+      context: .
+      dockerfile: host/Dockerfile
+      args: { HOST: worker-1 }
+    hostname: worker-1
+    volumes:
+      - ${DEMO_KEYS:?}/worker-1:/keys:ro
+
+  control:
+    build:
+      context: .
+      dockerfile: control/Dockerfile
+    profiles: ["run"]
+    working_dir: /src
+    volumes:
+      - ..:/src:ro
+      - ${DEMO_KEYS:?}/control:/keys:ro
+    depends_on: [web-1, worker-1]

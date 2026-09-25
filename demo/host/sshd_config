@@ -1,0 +1,12 @@
+# Demo sshd: key only, one unprivileged user, nothing forwarded.
+Port 22
+HostKey /etc/ssh/ssh_host_ed25519_key
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+AllowUsers drift
+AllowTcpForwarding no
+X11Forwarding no
+PermitTunnel no
+LogLevel ERROR

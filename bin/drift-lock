@@ -1,0 +1,235 @@
+#!/bin/sh
+# drift-lock: run a command inside a NAMED critical section.
+#
+# usage: drift-lock [-t SECONDS] NAME -- COMMAND [ARG...]
+#
+#   NAME must be listed in locks.conf. A lock with a mistyped name excludes
+#   nobody and still looks like it does, which is the quietest failure a lock
+#   can have. So the list is closed and an unknown name is an error.
+#
+#   -t  give up after SECONDS (default 300). On timeout the command does NOT
+#       run and the exit code is 2. A lock that gives up and runs anyway is
+#       worse than no lock.
+#
+# Environment:
+#   DRIFT_LOCK_DIR     where lock directories live
+#                      (default ${TMPDIR:-/tmp}/drift-locks-<uid>)
+#   DRIFT_LOCKS_FILE   the closed list of names (default <repo>/locks.conf)
+#   DRIFT_LOCK_POLL    seconds between attempts (default 0.2)
+#   DRIFT_LOCK_GRACE   seconds a lock may exist without an owner file before
+#                      it is treated as abandoned (default 5)
+#
+# Exit: the command's own exit code, or 2 for usage error, unknown name or
+# timeout.
+#
+# How it works: `mkdir` is atomic on every POSIX file system, so it is the
+# lock. The owner file inside records this process, the command's process,
+# the host and the start time. A lock is STALE only when it was taken on this
+# host and neither recorded process is alive. Stale locks are removed under a
+# separate guard directory, and the owner is re-read under that guard, so two
+# waiters can never both "recover" the same lock and one of them delete a lock
+# the other has just taken.
+
+set -u
+
+here=$(cd "$(dirname "$0")/.." && pwd) || exit 2
+uid=$(id -u)
+lockdir=${DRIFT_LOCK_DIR:-${TMPDIR:-/tmp}/drift-locks-$uid}
+names=${DRIFT_LOCKS_FILE:-$here/locks.conf}
+poll=${DRIFT_LOCK_POLL:-0.2}
+grace=${DRIFT_LOCK_GRACE:-5}
+timeout=300
+
+say() { printf 'drift-lock: %s\n' "$*" >&2; }
+usage() { say "usage: drift-lock [-t SECONDS] NAME -- COMMAND [ARG...]"; exit 2; }
+
+while getopts t: opt; do
+  case $opt in
+    t) timeout=$OPTARG ;;
+    *) usage ;;
+  esac
+done
+shift $((OPTIND - 1))
+[ $# -ge 3 ] || usage
+name=$1
+[ "$2" = "--" ] || usage
+shift 2
+
+case $timeout in '' | *[!0-9]*) say "timeout must be whole seconds"; exit 2 ;; esac
+case $name in '' | *[!a-z0-9-]*) say "invalid lock name: $name"; exit 2 ;; esac
+[ -f "$names" ] || { say "lock list not found: $names"; exit 2; }
+if ! grep -v '^[[:space:]]*#' "$names" | awk '{print $1}' | grep -qx -- "$name"; then
+  say "unknown lock name '$name' (known: $(grep -v '^[[:space:]]*#' "$names" | awk 'NF{print $1}' | tr '\n' ' '))"
+  exit 2
+fi
+
+mkdir -p "$lockdir" || exit 2
+L="$lockdir/$name.lock"
+G="$lockdir/$name.steal"
+me=$(hostname 2>/dev/null || uname -n)
+
+alive() {
+  [ -n "$1" ] || return 1
+  kill -0 "$1" 2>/dev/null && return 0
+  [ -d "/proc/$1" ]
+}
+
+# The owner file is read ONCE per decision (a snapshot), and always replaced
+# with an atomic mv, so a decision never mixes two owners' fields.
+snapshot() { owner=$(cat "$L/owner" 2>/dev/null); }
+field() { printf '%s\n' "$owner" | sed -n "s/^$1=//p"; }
+# ino PATH: inode number of a lock or guard directory (names are our own).
+# shellcheck disable=SC2012
+ino() { ls -di "$1" 2>/dev/null | awk '{print $1}'; }
+
+# Succeed if the lock at $L is stale, with the reason in $reason. Runs in the
+# current shell (not in $(...)) because it keeps timers across calls. Only
+# called while holding the guard $G, and holders release under $G too, so the
+# lock cannot change hands while this decides (a new holder can only appear
+# after the directory is gone).
+is_stale() {
+  reason=
+  snapshot
+  if [ -z "$owner" ]; then
+    # Ownerless: a holder between mkdir and its first write, or one that died
+    # right there. Only the SAME directory staying ownerless for the whole
+    # grace period counts; a lock that changed hands restarts the clock.
+    _ino=$(ino "$L")
+    # Gone already: its holder released it. Just try mkdir again.
+    [ -n "$_ino" ] || { noowner_ino=; return 1; }
+    if [ "$_ino" != "$noowner_ino" ]; then
+      noowner_ino=$_ino
+      noowner_since=$(date +%s)
+      return 1
+    fi
+    [ $(($(date +%s) - noowner_since)) -ge "$grace" ] || return 1
+    reason="no owner file for ${grace}s"
+    return 0
+  fi
+  noowner_ino=
+  _host=$(field host)
+  _pid=$(field pid)
+  _child=$(field child)
+  [ -n "$_host" ] && [ -n "$_pid" ] || return 1
+  if [ "$_host" != "$me" ]; then
+    [ "$warned" = 1 ] || say "lock $name is held from host $_host, waiting (cannot check its process from here)"
+    warned=1
+    return 1
+  fi
+  alive "$_pid" && return 1
+  alive "$_child" && return 1
+  reason="holder pid $_pid (command pid ${_child:-none}) is gone"
+}
+
+# try_guard: take the guard directory without waiting. A guard that stays in
+# place for the grace period was left by a process that died holding it.
+try_guard() {
+  if mkdir "$G" 2>/dev/null; then
+    guard_ino=
+    return 0
+  fi
+  _gi=$(ino "$G")
+  [ -n "$_gi" ] || { guard_ino=; return 1; }
+  if [ "$_gi" != "$guard_ino" ]; then
+    guard_ino=$_gi
+    guard_since=$(date +%s)
+    return 1
+  fi
+  if [ $(($(date +%s) - guard_since)) -ge "$grace" ]; then
+    say "removing guard $G left for ${grace}s by a process that died recovering"
+    rmdir "$G" 2>/dev/null
+    guard_ino=
+  fi
+  return 1
+}
+
+steal_if_stale() {
+  try_guard || return 1
+  if is_stale; then
+    # With an owner: that owner is dead, and nobody else can take a lock that
+    # still exists, so removing its file is safe. Without one: remove only the
+    # half-written temp file, so rmdir fails if an owner appears meanwhile.
+    if [ -n "$owner" ]; then rm -f "$L/owner"; fi
+    rm -f "$L/owner.tmp"
+    if rmdir "$L" 2>/dev/null; then
+      say "recovered stale lock $name: $reason"
+    fi
+    noowner_ino=
+  fi
+  rmdir "$G" 2>/dev/null
+  return 0
+}
+
+token=
+release() {
+  [ -n "$token" ] || return 0
+  # Release under the guard, so a waiter judging staleness never sees half of
+  # a release.
+  guard_ino=
+  until try_guard; do sleep "$poll"; done
+  snapshot
+  if [ "$(field token)" = "$token" ]; then
+    rm -f "$L/owner"
+    rmdir "$L" 2>/dev/null
+  fi
+  rmdir "$G" 2>/dev/null
+  token=
+}
+
+write_owner() {
+  {
+    echo "name=$name"
+    echo "host=$me"
+    echo "pid=$$"
+    echo "child=$1"
+    echo "since=$since"
+    echo "token=$token"
+    echo "command=$cmdline"
+  } >"$L/owner.tmp" && mv "$L/owner.tmp" "$L/owner"
+}
+
+start=$(date +%s)
+noowner_since=0
+noowner_ino=
+guard_since=0
+guard_ino=
+warned=0
+while ! mkdir "$L" 2>/dev/null; do
+  steal_if_stale
+  if [ $(($(date +%s) - start)) -ge "$timeout" ]; then
+    say "timeout after ${timeout}s waiting for lock $name; command NOT run"
+    snapshot
+    if [ -n "$owner" ]; then
+      say "held by: $(field host) pid $(field pid) since $(field since): $(field command)"
+    fi
+    exit 2
+  fi
+  sleep "$poll"
+done
+since=$(date +%s)
+token="$me:$$:$since"
+cmdline=$*
+write_owner "" || { say "could not record the owner of lock $name; command NOT run"; rmdir "$L" 2>/dev/null; exit 2; }
+
+child=
+# shellcheck disable=SC2329 # invoked by the trap below
+on_signal() {
+  [ -n "$child" ] && kill "$child" 2>/dev/null
+  release
+  exit 2
+}
+trap release EXIT
+trap on_signal INT TERM HUP
+
+# The command runs in the background so its pid can be recorded (and a holder
+# killed with -9 while its command still runs is not mistaken for stale).
+# Asynchronous lists get /dev/null as stdin by default, so pass ours through.
+exec 3<&0
+"$@" <&3 3<&- &
+child=$!
+write_owner "$child"
+wait "$child"
+rc=$?
+child=
+release
+exit "$rc"

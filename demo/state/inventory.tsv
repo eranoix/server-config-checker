@@ -1,0 +1,5 @@
+# name      transport  address
+# In the demo these names resolve on the compose network. Against real
+# machines, use whatever your ssh config resolves, e.g. ops@web-1.example.com.
+web-1       ssh        drift@web-1:22
+worker-1    ssh        drift@worker-1:22
