@@ -62,8 +62,6 @@ finish() {
   [ "$T_FAIL" -eq 0 ]
 }
 
-# ------------------------------------------------------------------ fixtures
-#
 # One host, "h1", whose file system root is $TD/live. The declared state is
 # $TD/state. `declare_*` writes the same thing on both sides, so a fresh
 # fixture always verifies green; a test then breaks the live side.
@@ -116,8 +114,6 @@ verify() {
   RC=$?
 }
 
-# ---------------------------------------------------------- negative tests
-#
 # negative KIND LABEL BREAK EXPECT
 #
 # The contract every check must honour, in three steps:

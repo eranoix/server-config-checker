@@ -71,8 +71,6 @@ indent() {
   sed 's/^/      /'
 }
 
-# ---------------------------------------------------------------- inventory
-
 # inventory_lookup HOST: prints "transport address" for HOST, or fails.
 inventory_lookup() {
   awk -v h="$1" '
@@ -81,8 +79,6 @@ inventory_lookup() {
     END { exit found ? 0 : 1 }
   ' "$DRIFT_INVENTORY"
 }
-
-# ---------------------------------------------------------------- transport
 
 # remote HOST SCRIPT [ARG...]
 #

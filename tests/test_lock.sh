@@ -27,20 +27,20 @@ fake_owner() {
 ran() { [ "$rc" -eq 0 ] && [ -e "$TD/ran" ]; }
 blocked() { [ "$rc" -eq 2 ] && [ ! -e "$TD/ran" ]; }
 
-# --- names are a closed list
+# names are a closed list
 out=$("$LOCK" -t 1 verfy -- touch "$TD/ran" 2>&1); rc=$?
 check "a mistyped lock name is refused (exit 2)" [ "$rc" -eq 2 ]
 check "... and the command does not run" [ ! -e "$TD/ran" ]
 check "... and the error lists the known names" contains "$out" "known: queue merge verify"
 
-# --- exit status and release
+# exit status and release
 "$LOCK" verify -- sh -c 'exit 7'; rc=$?
 check "the command's exit code is passed through" [ "$rc" -eq 7 ]
 check "the lock is released after a failing command" [ ! -d "$DRIFT_LOCK_DIR/verify.lock" ]
 out=$(echo "through stdin" | "$LOCK" verify -- cat)
 check "stdin reaches the command" [ "$out" = "through stdin" ]
 
-# --- mutual exclusion: 6 concurrent holders, never two inside at once
+# mutual exclusion: 6 concurrent holders, never two inside at once
 : >"$TD/trace"
 echo 0 >"$TD/counter"
 i=0
@@ -55,7 +55,7 @@ check "6 concurrent increments under the lock give 6" [ "$(cat "$TD/counter")" -
 check "the trace strictly alternates in/out (no overlap)" \
   same "$(trace_of "$TD/trace")" "in out in out in out in out in out in out "
 
-# --- timeout: the command must NOT run
+# timeout: the command must NOT run
 "$LOCK" verify -- sleep 3 &
 holder=$!
 sleep 0.5
@@ -69,28 +69,28 @@ kill "$holder" 2>/dev/null
 wait "$holder" 2>/dev/null
 check "SIGTERM to a holder releases the lock" [ ! -d "$DRIFT_LOCK_DIR/verify.lock" ]
 
-# --- stale: holder and its command are both gone
+# stale: holder and its command are both gone
 fake_owner "$(dead_pid)" "$(dead_pid)"
 "$LOCK" -t 5 verify -- touch "$TD/ran" 2>"$TD/err"; rc=$?
 check "a lock whose holder died is recovered" ran
 check "... and the recovery is announced" grep -q "recovered stale lock verify" "$TD/err"
 rm -f "$TD/ran"
 
-# --- not stale: the holder is alive
+# not stale: the holder is alive
 sleep 30 &
 live=$!
 fake_owner "$live" ""
 "$LOCK" -t 1 verify -- touch "$TD/ran" 2>/dev/null; rc=$?
 check "a lock held by a live process is not stolen" blocked
 
-# --- not stale: holder killed with -9 but its command still running
+# not stale: holder killed with -9 but its command still running
 fake_owner "$(dead_pid)" "$live"
 "$LOCK" -t 1 verify -- touch "$TD/ran" 2>/dev/null; rc=$?
 check "holder gone but command alive: still not stolen" blocked
 kill "$live"; wait "$live" 2>/dev/null
 rm -rf "$DRIFT_LOCK_DIR/verify.lock"
 
-# --- the real thing: kill -9 a running drift-lock, then kill its command
+# the real thing: kill -9 a running drift-lock, then kill its command
 "$LOCK" verify -- sh -c 'echo $$ >"$1"; exec sleep 30' _ "$TD/childpid" &
 holder=$!
 n=0
@@ -103,20 +103,20 @@ kill "$(cat "$TD/childpid")"
 check "once the command is gone too, the next caller recovers the lock" ran
 rm -f "$TD/ran"
 
-# --- another host: cannot check its process, so never auto-recovered
+# another host: cannot check its process, so never auto-recovered
 fake_owner "$(dead_pid)" "" "other-host.example.com"
 "$LOCK" -t 1 verify -- touch "$TD/ran" 2>"$TD/err"; rc=$?
 check "a lock held from another host is not stolen" blocked
 check "... and the wait says so" grep -q "held from host other-host.example.com" "$TD/err"
 rm -rf "$DRIFT_LOCK_DIR/verify.lock"
 
-# --- a lock directory with no owner file (holder died between mkdir and write)
+# a lock directory with no owner file (holder died between mkdir and write)
 mkdir -p "$DRIFT_LOCK_DIR/verify.lock"
 DRIFT_LOCK_GRACE=1 "$LOCK" -t 5 verify -- touch "$TD/ran" 2>"$TD/err"; rc=$?
 check "an ownerless lock is recovered after the grace period" ran
 rm -f "$TD/ran"
 
-# --- a recovery guard left behind by a waiter that died mid-recovery
+# a recovery guard left behind by a waiter that died mid-recovery
 fake_owner "$(dead_pid)" "$(dead_pid)"
 mkdir "$DRIFT_LOCK_DIR/verify.steal"
 DRIFT_LOCK_GRACE=1 "$LOCK" -t 5 verify -- touch "$TD/ran" 2>"$TD/err"; rc=$?
@@ -125,7 +125,7 @@ check "... and both steps are announced" \
   sh -c 'grep -q "removing guard" "$1" && grep -q "recovered stale lock" "$1"' _ "$TD/err"
 rm -f "$TD/ran"
 
-# --- two waiters racing to recover the same stale lock: exactly one runs at a time
+# two waiters racing to recover the same stale lock: exactly one runs at a time
 fake_owner "$(dead_pid)" "$(dead_pid)"
 : >"$TD/trace"
 for _ in 1 2 3 4; do

@@ -52,7 +52,6 @@ trap 'exit 130' INT TERM
 command -v docker >/dev/null || die "docker is required"
 command -v ssh-keygen >/dev/null || die "ssh-keygen is required"
 
-# ---------------------------------------------------------------- 1. keys
 step "generating throwaway ssh keys for this run"
 mkdir -p "$DEMO_KEYS/control"
 ssh-keygen -q -t ed25519 -N '' -C "drift-demo-client" -f "$work/client" || die "ssh-keygen failed"
@@ -68,7 +67,6 @@ done
 chmod -R a+rX "$DEMO_KEYS"
 echo "keys in $work (deleted at the end)"
 
-# ---------------------------------------------------------------- 2. hosts
 step "starting web-1 and worker-1 (compose project $project)"
 dc --profile run build -q || die "build failed"
 dc up -d web-1 worker-1 || die "compose up failed"
@@ -91,14 +89,12 @@ verify() {
     bin/config-check -s demo/state
 }
 
-# ---------------------------------------------------------------- 3. green
 step "verifying declared state against the live hosts"
 green=$(verify 2>&1)
 rc=$?
 printf '%s\n' "$green"
 [ "$rc" -eq 0 ] || die "expected a clean run (exit 0), got exit $rc"
 
-# ---------------------------------------------------------------- 4. drift
 step "03:12, an incident: someone fixes things by hand, straight on the servers"
 cat <<'EOF'
   web-1:    raises client_max_body_size to 512m in the nginx site
@@ -111,7 +107,6 @@ dc exec -T worker-1 chmod 0666 /etc/app/worker.conf
 dc exec -T worker-1 sh -c "sed -i '/^QUEUE_URL=/d' /etc/app/worker.env && echo 'DEBUG_BYPASS_AUTH=demo-value-yes' >>/etc/app/worker.env"
 dc exec -T worker-1 rm /etc/systemd/system/timers.target.wants/cleanup.timer
 
-# ---------------------------------------------------------------- 5. red
 step "verifying again, the next morning"
 red=$(verify 2>&1)
 rc=$?
