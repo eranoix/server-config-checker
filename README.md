@@ -1,5 +1,7 @@
 # server-config-checker
 
+[![CI](https://github.com/eranoix/server-config-checker/actions/workflows/ci.yml/badge.svg)](https://github.com/eranoix/server-config-checker/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) ![shell POSIX sh](https://img.shields.io/badge/shell-POSIX%20sh-4EAA25?logo=gnubash&logoColor=white) ![docker compose one command](https://img.shields.io/badge/docker%20compose-one%20command-2496ED?logo=docker&logoColor=white)
+
 **Checks that servers are still set up the way they should be, and shows exactly what changed.**
 
 *In plain words:* When you look after several servers, their settings slowly drift away from what was planned, often without anyone noticing. This tool compares how each server should be set up with how it actually is. It lists every difference, down to the exact line in a file, and it never changes anything on the servers itself. It is for people who run servers and want to catch surprises before they cause trouble.
@@ -236,6 +238,22 @@ drift-queue run                         # merges in ticket order, gate after eac
 - If the machine dies mid-merge, an `inflight` record survives. The next run
   recovers the stale lock, resets to the recorded commit and merges the
   ticket again, properly. The tests do this with `kill -9`.
+
+## Tests
+
+```sh
+make lint    # ShellCheck over every script
+make test    # the offline suite: no network, no Docker
+make check   # both, the same gate the lock and the queue use
+```
+
+The suite in `tests/` covers each kind of check (`tests/checks/file.sh`,
+`envkeys.sh`, `unit.sh`) and the command line itself (`tests/test_cli.sh`), and
+`tests/coverage.sh` fails the run unless every check type has a test file
+and at least one negative case that passed in this run. CI runs the suite twice,
+under dash and again under busybox sh, so nothing Bash-only slips in. It then
+runs `make demo` end to end (green first, then the drift after the simulated
+incident) and fails if the demo leaves a container behind.
 
 ## Limitations
 
