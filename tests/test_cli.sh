@@ -56,12 +56,12 @@ ExecStart=/bin/true
 declare_env /etc/app/app.env "K=v
 " K
 before=$(cd "$LIVE" && find . -exec ls -ld {} + | sort | cksum)
-sumb=$(cd "$LIVE" && find . -type f -exec cat {} + | cksum)
+sum_before=$(cd "$LIVE" && find . -type f -exec cat {} + | cksum)
 verify
 after=$(cd "$LIVE" && find . -exec ls -ld {} + | sort | cksum)
-suma=$(cd "$LIVE" && find . -type f -exec cat {} + | cksum)
+sum_after=$(cd "$LIVE" && find . -type f -exec cat {} + | cksum)
 check "verifier run exits 0 on the full fixture" [ "$RC" -eq 0 ]
 check "verifier run leaves the host tree unchanged (listing)" same "$before" "$after"
-check "verifier run leaves the host tree unchanged (content)" same "$sumb" "$suma"
+check "verifier run leaves the host tree unchanged (content)" same "$sum_before" "$sum_after"
 
 finish
