@@ -8,20 +8,10 @@ A small, read-only verifier that compares the configuration you declared in a
 repository with what is actually on your servers, over plain SSH. POSIX shell,
 no agent on the hosts, nothing to install on them.
 
-```
-$ bin/config-check -s demo/state
-FAIL  web-1     file     /etc/nginx/http.d/site.conf
-      content differs:
-      --- declared  files/web-1/etc/nginx/http.d/site.conf
-      +++ live      web-1:/etc/nginx/http.d/site.conf
-      @@ -3,7 +3,7 @@
-           listen 80;
-           server_name app.example.com;
+After someone edits two servers by hand, the demo (`make demo`) reports exactly
+what changed:
 
-      -    client_max_body_size 10m;
-      +    client_max_body_size 512m;
-...
-```
+<p align="center"><img src="docs/screenshots/01-drift.png" width="49%" alt="The verifier reporting four drifted checks, with a diff of the edited nginx site"> <img src="docs/screenshots/01-drift-dark.png" width="49%" alt="The verifier reporting four drifted checks, with a diff of the edited nginx site (dark)"></p>
 
 ## Why I built it
 
@@ -80,11 +70,19 @@ The demo:
 5. runs the verifier again: 4 checks drift, with diffs, exit 1;
 6. removes everything it created (containers, network, built images, keys).
 
+The first verification, before the incident, is all green:
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/02-clean-run-dark.png"><img src="docs/screenshots/02-clean-run.png" alt="make demo: keys generated, both hosts up, and all seven checks passing"></picture>
+
+The report is coloured when it goes to a terminal; `DRIFT_COLOR=always make demo`
+keeps the colours inside the demo's containers too.
+
 The demo fails if step 3 is not green, if step 5 is not red, or if any env
 value shows up anywhere in its output. It uses a unique compose project name
 per run, so it never touches other containers on your machine.
 
-To run the offline test suite (no network, no Docker):
+To run the offline test suite (no network, no Docker; the lint step needs
+[ShellCheck](https://www.shellcheck.net), for example `apt install shellcheck`):
 
 ```sh
 make check      # shellcheck + tests

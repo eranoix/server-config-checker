@@ -118,12 +118,15 @@ rc=$?
 printf '%s\n' "$red"
 [ "$rc" -eq 1 ] || die "expected drift (exit 1), got exit $rc"
 
-drifted=$(printf '%s\n' "$red" | grep -c '^FAIL')
+# DRIFT_COLOR=always colours the report; the checks below read it without colour.
+esc=$(printf '\033')
+red_plain=$(printf '%s\n' "$red" | sed "s/${esc}\\[[0-9;]*m//g")
+drifted=$(printf '%s\n' "$red_plain" | grep -c '^FAIL')
 [ "$drifted" -eq 4 ] || die "expected 4 drifted checks, got $drifted"
 for needle in '+    client_max_body_size 512m;' 'mode: declared 0644, live 0666' \
   'declared but missing on host: QUEUE_URL' 'on host but not declared:     DEBUG_BYPASS_AUTH' \
   'state: declared enabled, live disabled'; do
-  printf '%s\n' "$red" | grep -qF -- "$needle" || die "drift report is missing: $needle"
+  printf '%s\n' "$red_plain" | grep -qF -- "$needle" || die "drift report is missing: $needle"
 done
 # Every env value in the fixtures contains "demo-value". None may be printed.
 if printf '%s\n%s\n' "$green" "$red" | grep -q 'demo-value'; then
