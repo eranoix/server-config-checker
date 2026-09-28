@@ -1,13 +1,4 @@
 #!/bin/sh
-# tests/coverage.sh ROOT LEDGER
-#
-# "A check without a failing test doesn't count." Every check kind in
-# ROOT/lib/checks/ must have a test file tests/checks/KIND.sh AND at least one
-# negative case recorded as passing in LEDGER during this run. Having the file
-# is not enough: a file whose negative cases all fail, or that has none, still
-# leaves the check unproven.
-#
-# Exit: 0 every kind covered · 1 some kind uncovered · 2 usage.
 set -u
 root=${1:?usage: coverage.sh ROOT LEDGER}
 ledger=${2:?usage: coverage.sh ROOT LEDGER}

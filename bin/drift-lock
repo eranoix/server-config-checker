@@ -1,34 +1,4 @@
 #!/bin/sh
-# drift-lock: run a command inside a NAMED critical section.
-#
-# usage: drift-lock [-t SECONDS] NAME -- COMMAND [ARG...]
-#
-#   NAME must be listed in locks.conf. A lock with a mistyped name excludes
-#   nobody and still looks like it does, which is the quietest failure a lock
-#   can have. So the list is closed and an unknown name is an error.
-#
-#   -t  give up after SECONDS (default 300). On timeout the command does NOT
-#       run and the exit code is 2. A lock that gives up and runs anyway is
-#       worse than no lock.
-#
-# Environment:
-#   DRIFT_LOCK_DIR     where lock directories live
-#                      (default ${TMPDIR:-/tmp}/drift-locks-<uid>)
-#   DRIFT_LOCKS_FILE   the closed list of names (default <repo>/locks.conf)
-#   DRIFT_LOCK_POLL    seconds between attempts (default 0.2)
-#   DRIFT_LOCK_GRACE   seconds a lock may exist without an owner file before
-#                      it is treated as abandoned (default 5)
-#
-# Exit: the command's own exit code, or 2 for usage error, unknown name or
-# timeout.
-#
-# How it works: `mkdir` is atomic on every POSIX file system, so it is the
-# lock. The owner file inside records this process, the command's process,
-# the host and the start time. A lock is STALE only when it was taken on this
-# host and neither recorded process is alive. Stale locks are removed under a
-# separate guard directory, and the owner is re-read under that guard, so two
-# waiters can never both "recover" the same lock and one of them delete a lock
-# the other has just taken.
 
 set -u
 
@@ -74,28 +44,16 @@ alive() {
   [ -d "/proc/$1" ]
 }
 
-# The owner file is read ONCE per decision (a snapshot), and always replaced
-# with an atomic mv, so a decision never mixes two owners' fields.
 snapshot() { owner=$(cat "$L/owner" 2>/dev/null); }
 field() { printf '%s\n' "$owner" | sed -n "s/^$1=//p"; }
-# ino PATH: inode number of a lock or guard directory (names are our own).
 # shellcheck disable=SC2012
 ino() { ls -di "$1" 2>/dev/null | awk '{print $1}'; }
 
-# Succeed if the lock at $L is stale, with the reason in $reason. Runs in the
-# current shell (not in $(...)) because it keeps timers across calls. Only
-# called while holding the guard $G, and holders release under $G too, so the
-# lock cannot change hands while this decides (a new holder can only appear
-# after the directory is gone).
 is_stale() {
   reason=
   snapshot
   if [ -z "$owner" ]; then
-    # Ownerless: a holder between mkdir and its first write, or one that died
-    # right there. Only the SAME directory staying ownerless for the whole
-    # grace period counts; a lock that changed hands restarts the clock.
     _ino=$(ino "$L")
-    # Gone already: its holder released it. Just try mkdir again.
     [ -n "$_ino" ] || { noowner_ino=; return 1; }
     if [ "$_ino" != "$noowner_ino" ]; then
       noowner_ino=$_ino
@@ -121,8 +79,6 @@ is_stale() {
   reason="holder pid $_pid (command pid ${_child:-none}) is gone"
 }
 
-# try_guard: take the guard directory without waiting. A guard that stays in
-# place for the grace period was left by a process that died holding it.
 try_guard() {
   if mkdir "$G" 2>/dev/null; then
     guard_ino=
@@ -146,9 +102,6 @@ try_guard() {
 steal_if_stale() {
   try_guard || return 1
   if is_stale; then
-    # With an owner: that owner is dead, and nobody else can take a lock that
-    # still exists, so removing its file is safe. Without one: remove only the
-    # half-written temp file, so rmdir fails if an owner appears meanwhile.
     if [ -n "$owner" ]; then rm -f "$L/owner"; fi
     rm -f "$L/owner.tmp"
     if rmdir "$L" 2>/dev/null; then
@@ -163,8 +116,6 @@ steal_if_stale() {
 token=
 release() {
   [ -n "$token" ] || return 0
-  # Release under the guard, so a waiter judging staleness never sees half of
-  # a release.
   guard_ino=
   until try_guard; do sleep "$poll"; done
   snapshot
@@ -221,9 +172,6 @@ on_signal() {
 trap release EXIT
 trap on_signal INT TERM HUP
 
-# The command runs in the background so its pid can be recorded (and a holder
-# killed with -9 while its command still runs is not mistaken for stale).
-# Asynchronous lists get /dev/null as stdin by default, so pass ours through.
 exec 3<&0
 "$@" <&3 3<&- &
 child=$!

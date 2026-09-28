@@ -1,18 +1,10 @@
 # shellcheck shell=sh
-# lib/common.sh: helpers shared by bin/config-check and the check modules.
-#
-# Everything here is POSIX sh. Names that come from the declared state (host
-# names, paths, unit names) are validated against a closed character set
-# before they get anywhere near a shell or an ssh command line. That is what
-# lets the transport pass them as plain arguments without quoting tricks.
 
-# Printed on stderr, never mixed into the report on stdout.
 die() {
   printf 'config-check: %s\n' "$*" >&2
   exit 2
 }
 
-# valid_host NAME: lower case letters, digits, dot and dash.
 valid_host() {
   case $1 in
     '' | [!a-z0-9]* | *[!a-z0-9.-]*) return 1 ;;
@@ -20,7 +12,6 @@ valid_host() {
   return 0
 }
 
-# valid_path PATH: absolute, conservative characters, no "..".
 valid_path() {
   case $1 in
     /*) ;;
@@ -32,7 +23,6 @@ valid_path() {
   return 0
 }
 
-# valid_unit NAME: a systemd unit file name with a known suffix.
 valid_unit() {
   case $1 in
     */* | *[!A-Za-z0-9@._-]*) return 1 ;;
@@ -43,9 +33,6 @@ valid_unit() {
   return 1
 }
 
-# looks_like_env_file PATH: files that may hold secrets are only ever compared
-# by key name. The `file` check refuses them so a content diff can never print
-# a value.
 looks_like_env_file() {
   _b=${1##*/}
   case $_b in
@@ -54,7 +41,6 @@ looks_like_env_file() {
   return 1
 }
 
-# strip_zeros MODE: "0644" and "644" compare equal.
 strip_zeros() {
   _m=$1
   while :; do
@@ -66,12 +52,10 @@ strip_zeros() {
   printf '%s' "$_m"
 }
 
-# indent: prefix every line of stdin so details sit under their status line.
 indent() {
   sed 's/^/      /'
 }
 
-# inventory_lookup HOST: prints "transport address" for HOST, or fails.
 inventory_lookup() {
   awk -v h="$1" '
     /^[[:space:]]*(#|$)/ { next }
@@ -80,16 +64,6 @@ inventory_lookup() {
   ' "$DRIFT_INVENTORY"
 }
 
-# remote HOST SCRIPT [ARG...]
-#
-# Runs one of the read-only scripts in lib/remote/ on HOST. The script travels
-# on stdin (`sh -s`), so nothing is installed on the target and nothing needs
-# to exist there except a POSIX shell. Arguments are validated by the caller.
-#
-# Transports:
-#   ssh   ADDRESS is user@host or user@host:port
-#   local ADDRESS is a directory used as the file system root. This is what
-#         the offline test suite uses; it runs the very same remote script.
 remote() {
   _rh=$1 _rs=$2
   shift 2
@@ -125,7 +99,6 @@ remote() {
   esac
 }
 
-# remote_status CODE: turns the exit codes of lib/remote/*.sh into words.
 remote_status() {
   case $1 in
     3) printf 'missing on host' ;;

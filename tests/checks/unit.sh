@@ -1,6 +1,5 @@
 #!/bin/sh
 # shellcheck disable=SC2016 # break snippets expand later, in the shell that runs them
-# Negative tests for the `unit` check (lib/checks/unit.sh).
 # shellcheck source=../lib.sh
 . "$(dirname "$0")/../lib.sh"
 

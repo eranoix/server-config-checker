@@ -1,5 +1,4 @@
 #!/bin/sh
-# Behaviour of the command line: exit codes, host filter, fail-closed errors.
 # shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
@@ -10,8 +9,6 @@ verify
 check "clean fixture exits 0" [ "$RC" -eq 0 ]
 check "summary line is printed" contains "$OUT" "1 checks: 1 passed, 0 drifted, 0 could not run"
 
-# An unreachable host is an ERROR, never a PASS. ProxyCommand=false makes ssh
-# fail at once without sending a single packet anywhere.
 printf 'h2 ssh nobody@192.0.2.10:22\n' >>"$STATE/inventory.tsv"
 mkdir -p "$STATE/files/h2/etc/app" && cp "$STATE/files/h1/etc/app/app.conf" "$STATE/files/h2/etc/app/"
 printf 'h2 file /etc/app/app.conf 0644\n' >>"$STATE/checks.tsv"
@@ -46,7 +43,6 @@ check "host missing from the inventory is an error" [ "$RC" -eq 2 ]
 OUT=$("$DV" -s "$TD/does-not-exist" 2>&1); RC=$?
 check "missing state directory is a usage error" [ "$RC" -eq 2 ]
 
-# Read-only: a full run must not change a single byte of the live tree.
 fx_init
 declare_file /etc/app/app.conf 0644 "a=1
 "

@@ -1,11 +1,4 @@
 # shellcheck shell=sh
-# check `file`: content and mode of a plain config file.
-#
-#   HOST  file  /abs/path  MODE
-#
-# Declared content lives at $DRIFT_STATE/files/HOST/abs/path. Files that can
-# hold secrets are refused here and must use `envkeys`, because a content diff
-# is exactly the place where a value would be printed.
 
 check_file() {
   _h=$1 _p=$2 _mode=$3

@@ -1,6 +1,5 @@
 #!/bin/sh
 # shellcheck disable=SC2016 # break snippets expand later, in the shell that runs them
-# Negative tests for the `envkeys` check (lib/checks/envkeys.sh).
 # shellcheck source=../lib.sh
 . "$(dirname "$0")/../lib.sh"
 
@@ -30,8 +29,6 @@ negative envkeys "a deleted env file is drift" \
   'rm "$LIVE/etc/app/app.env"' \
   'missing on host'
 
-# Changing only a VALUE is not drift for this check, on purpose: values are
-# never read, so they cannot be compared. This pins that behaviour down.
 fx_init; declare_env /etc/app/app.env "$ENV" DATABASE_URL QUEUE_URL LOG_LEVEL
 sed -i.bak 's/info/debug/' "$LIVE/etc/app/app.env" && rm -f "$LIVE/etc/app/app.env.bak"
 verify

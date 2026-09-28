@@ -1,19 +1,4 @@
 #!/bin/sh
-# demo/demo.sh: the whole story in one command (`make demo`).
-#
-#   1. generate throwaway ssh keys (client and host keys) for this run only
-#   2. start two fake servers, web-1 and worker-1, with docker compose
-#   3. run the verifier: everything matches, exit 0
-#   4. make the kind of changes people make by hand during an incident
-#   5. run the verifier again: drift is found, shown as a diff, exit 1
-#   6. tear everything down: containers, network, built images, keys
-#
-# The demo itself fails (non-zero) unless step 3 is green, step 5 is red, and
-# no env value appears anywhere in the output.
-#
-# Environment:
-#   DEMO_KEEP=1      leave the stack running and keep the keys (for poking at)
-#   DEMO_PROJECT     compose project name (default: a random, unique one)
 
 set -u
 
@@ -29,7 +14,6 @@ bold=$(printf '\033[1m') off=$(printf '\033[0m')
 step() { printf '\n%s==> %s%s\n' "$bold" "$*" "$off"; }
 die() { printf 'demo: %s\n' "$*" >&2; exit 1; }
 
-# Keep compose's progress lines out of the verifier output where supported.
 progress=''
 docker compose --progress quiet version >/dev/null 2>&1 && progress='--progress quiet'
 # shellcheck disable=SC2086 # $progress is empty or two words
@@ -61,7 +45,6 @@ for h in web-1 worker-1; do
   mkdir -p "$DEMO_KEYS/$h"
   ssh-keygen -q -t ed25519 -N '' -C "drift-demo-$h" -f "$DEMO_KEYS/$h/host_ed25519" || die "ssh-keygen failed"
   cp "$work/client.pub" "$DEMO_KEYS/$h/client.pub"
-  # Pin each host key: the verifier runs with StrictHostKeyChecking=yes.
   printf '%s %s\n' "$h" "$(cut -d' ' -f1,2 "$DEMO_KEYS/$h/host_ed25519.pub")" >>"$DEMO_KEYS/control/known_hosts"
 done
 chmod -R a+rX "$DEMO_KEYS"
@@ -113,7 +96,6 @@ rc=$?
 printf '%s\n' "$red"
 [ "$rc" -eq 1 ] || die "expected drift (exit 1), got exit $rc"
 
-# DRIFT_COLOR=always colours the report; the checks below read it without colour.
 esc=$(printf '\033')
 red_plain=$(printf '%s\n' "$red" | sed "s/${esc}\\[[0-9;]*m//g")
 drifted=$(printf '%s\n' "$red_plain" | grep -c '^FAIL')
@@ -123,7 +105,6 @@ for needle in '+    client_max_body_size 512m;' 'mode: declared 0644, live 0666'
   'state: declared enabled, live disabled'; do
   printf '%s\n' "$red_plain" | grep -qF -- "$needle" || die "drift report is missing: $needle"
 done
-# Every env value in the fixtures contains "demo-value". None may be printed.
 if printf '%s\n%s\n' "$green" "$red" | grep -q 'demo-value'; then
   die "an env value leaked into the output"
 fi

@@ -1,23 +1,4 @@
 #!/bin/sh
-# config-check: compare declared state with live hosts, read-only.
-#
-# usage: config-check [-s STATE_DIR] [-i INVENTORY] [-c CHECKS] [-q] [HOST...]
-#
-#   -s  state directory (default ./state). Holds files/, units/, envkeys/.
-#   -i  inventory file  (default STATE_DIR/inventory.tsv)
-#   -c  checks file     (default STATE_DIR/checks.tsv)
-#   -q  only print failures and the summary
-#   HOST  limit the run to these hosts
-#
-# Environment:
-#   DRIFT_SSH_KEY       private key for ssh (optional)
-#   DRIFT_KNOWN_HOSTS   known_hosts file; when set, host keys are enforced
-#   DRIFT_SSH_OPTS      extra ssh options, split on spaces
-#   DRIFT_SSH_TIMEOUT   connect timeout in seconds (default 5)
-#   DRIFT_COLOR         always | never | auto (default auto, honours NO_COLOR)
-#
-# Exit: 0 no drift · 1 drift found · 2 a check could not run, or usage error.
-# An unreachable host is never a pass: the run is incomplete, so it exits 2.
 
 set -u
 
@@ -88,7 +69,6 @@ wanted() {
 }
 
 pass=0 fail=0 err=0 total=0
-# The loop reads the checks file on fd 3 so nothing the checks run can eat it.
 while read -r host kind target expect rest <&3; do
   case $host in '' | '#'*) continue ;; esac
   wanted "$host" "$@" || continue

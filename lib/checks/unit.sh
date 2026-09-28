@@ -1,10 +1,4 @@
 # shellcheck shell=sh
-# check `unit`: a systemd unit file and whether it is enabled.
-#
-#   HOST  unit  name.service  enabled|disabled
-#
-# Declared content lives at $DRIFT_STATE/units/HOST/name.service. See
-# lib/remote/unit.sh for how "enabled" is read without calling systemctl.
 
 check_unit() {
   _h=$1 _u=$2 _want=$3

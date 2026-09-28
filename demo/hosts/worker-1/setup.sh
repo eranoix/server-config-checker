@@ -1,5 +1,4 @@
 #!/bin/sh
-# Fixture permissions and enablement for worker-1, applied at image build time.
 set -eu
 chmod 0644 /etc/app/worker.conf /etc/systemd/system/worker.service /etc/systemd/system/cleanup.timer
 chown root:drift /etc/app/worker.env

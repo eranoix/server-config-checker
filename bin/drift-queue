@@ -1,33 +1,4 @@
 #!/bin/sh
-# drift-queue: a FIFO merge queue for concurrent changes to the declared state.
-#
-# usage:
-#   drift-queue [-r REPO] [-b TARGET] submit BRANCH   take a ticket, join the queue
-#   drift-queue [-r REPO] list                         show pending tickets in order
-#   drift-queue [-r REPO] [-b TARGET] run              merge every pending ticket
-#
-#   -r  repository (default: current directory)
-#   -b  branch that receives the merges (default: main)
-#
-# Environment:
-#   DRIFT_QUEUE_GATE  command that must pass after each merge
-#                     (default: make check). It runs in the repository.
-#
-# Rules, and why:
-#   1. Order is ticket order. A ticket number is taken under the short `queue`
-#      lock, so concurrent submitters always get distinct, increasing numbers
-#      and the queue is first come, first merged.
-#   2. One merge at a time, under the `merge` lock. Every merge is --no-ff so
-#      the history records which ticket passed the gate, in which order.
-#   3. A red gate (or a conflict) REJECTS the ticket and puts the target back
-#      exactly where it was. Nothing is fixed inside a merge. The next ticket
-#      still gets its turn; a broken neighbour must not block the line.
-#   4. A merge interrupted by a crash is detected on the next run (an
-#      `inflight` record survives it), the target is reset to the recorded
-#      commit, and the ticket keeps its place at the head of the queue.
-#
-# Exit: 0 all merged (or nothing to do) · 1 some ticket rejected · 2 usage,
-# dirty tree, wrong branch or lock not obtained.
 
 set -u
 
@@ -49,16 +20,12 @@ shift
 say() { printf 'drift-queue: %s\n' "$*" >&2; }
 fail() { say "$*"; exit 2; }
 
-# Scripts started from a git hook inherit GIT_DIR and GIT_WORK_TREE, which
-# override -C. Drop them so the queue always acts on the repository it was
-# given.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 g() { git -C "$repo" "$@"; }
 
 g rev-parse --git-dir >/dev/null 2>&1 || fail "not a git repository: $repo"
 common=$(g rev-parse --git-common-dir) || exit 2
 case $common in /*) ;; *) common="$(cd "$repo" && pwd)/$common" ;; esac
-# The queue lives in the COMMON git dir, so every worktree sees the same line.
 Q="$common/drift-queue"
 mkdir -p "$Q/pending" "$Q/done" "$Q/rejected" "$Q/locks" || exit 2
 DRIFT_LOCK_DIR="$Q/locks"
@@ -71,8 +38,6 @@ valid_branch() {
   git check-ref-format --branch "$1" >/dev/null 2>&1
 }
 
-# Pending tickets, oldest first. Names are zero-padded numbers, so the glob's
-# sorted expansion is ticket order.
 pending() {
   for _f in "$Q/pending"/[0-9]*; do
     [ -e "$_f" ] && echo "${_f##*/}"
@@ -89,7 +54,6 @@ case $cmd in
     ;;
 
   _submit)
-    # Runs under the `queue` lock.
     b=$1
     for f in $(pending); do
       [ "$(sed -n 1p "$Q/pending/$f")" = "$b" ] && fail "branch $b is already queued as #${f%%-*}"
@@ -114,7 +78,6 @@ case $cmd in
     ;;
 
   _run)
-    # Runs under the `merge` lock: nobody else is merging.
     gate=${DRIFT_QUEUE_GATE:-make check}
     cur=$(g rev-parse --abbrev-ref HEAD)
     [ "$cur" = "$target" ] || fail "repository is on $cur, expected $target"
@@ -128,8 +91,6 @@ case $cmd in
       rm -f "$Q/inflight"
     fi
 
-    # Only tracked changes count as dirty: the gate may write untracked
-    # artifacts, and those must not make the next run refuse to start.
     [ -z "$(g status --porcelain --untracked-files=no)" ] || fail "tracked files have uncommitted changes in $repo"
 
     rejected=0

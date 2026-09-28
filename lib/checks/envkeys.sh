@@ -1,12 +1,4 @@
 # shellcheck shell=sh
-# check `envkeys`: the SET OF KEY NAMES in an env file.
-#
-#   HOST  envkeys  /abs/path/app.env  -
-#
-# Declared keys live at $DRIFT_STATE/envkeys/HOST/abs/path/app.env.keys, one
-# name per line. The remote script only ever emits key names (see
-# lib/remote/envkeys.sh), and remote stderr is never echoed for this check,
-# so no code path here can print a value.
 
 check_envkeys() {
   _h=$1 _p=$2

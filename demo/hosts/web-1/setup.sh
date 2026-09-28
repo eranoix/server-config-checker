@@ -1,5 +1,4 @@
 #!/bin/sh
-# Fixture permissions and enablement for web-1, applied at image build time.
 set -eu
 chmod 0644 /etc/nginx/http.d/site.conf /etc/systemd/system/web.service
 chown root:drift /etc/app/web.env

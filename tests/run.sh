@@ -1,6 +1,4 @@
 #!/bin/sh
-# tests/run.sh: run the whole suite. Exit 0 only if every test passed AND
-# every check kind is covered by at least one passing negative test.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(dirname "$here")

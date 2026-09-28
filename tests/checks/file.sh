@@ -1,6 +1,5 @@
 #!/bin/sh
 # shellcheck disable=SC2016 # break snippets expand later, in the shell that runs them
-# Negative tests for the `file` check (lib/checks/file.sh).
 # shellcheck source=../lib.sh
 . "$(dirname "$0")/../lib.sh"
 
@@ -33,7 +32,6 @@ negative file "a file replaced by a directory is not a pass" \
   'rm "$LIVE/etc/app/app.conf" && mkdir "$LIVE/etc/app/app.conf"' \
   'not a regular file'
 
-# Not a negative case, a guard: env-like files are refused outright.
 fx_init; declare_file /etc/app/app.env 0600 "TOKEN=abc
 "
 verify

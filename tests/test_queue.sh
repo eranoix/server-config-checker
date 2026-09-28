@@ -1,18 +1,15 @@
 #!/bin/sh
-# bin/drift-queue: FIFO order, concurrent submits, rejection, crash recovery.
 # shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
 QUEUE="$ROOT/bin/drift-queue"
 R="$TD/repo"
-# A private git environment: no user config, a fixed test identity.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 HOME=$TD
 GIT_CONFIG_NOSYSTEM=1
 GIT_AUTHOR_NAME="Test Runner" GIT_AUTHOR_EMAIL=test@example.com
 GIT_COMMITTER_NAME="Test Runner" GIT_COMMITTER_EMAIL=test@example.com
 DRIFT_LOCK_POLL=0.05
-# The gate: a change that adds a file named BROKEN is red.
 DRIFT_QUEUE_GATE='test ! -e BROKEN'
 export HOME GIT_CONFIG_NOSYSTEM GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL DRIFT_LOCK_POLL DRIFT_QUEUE_GATE
 
@@ -25,7 +22,6 @@ new_repo() {
   g add shared.txt && g commit -q -m "initial"
 }
 
-# branch NAME FILE CONTENT: a branch off main that writes one file.
 branch() {
   g checkout -q -b "$1" main
   printf '%s\n' "$3" >"$R/$2"
@@ -35,7 +31,6 @@ branch() {
 
 log_subjects() { g log --first-parent --format=%s main | tr '\n' '|'; }
 
-# FIFO: tickets are merged in the order they were taken
 new_repo
 branch c c.txt c; branch a a.txt a; branch b b.txt b
 "$QUEUE" -r "$R" submit c >/dev/null
@@ -51,7 +46,6 @@ check "every queue commit is a real merge (two parents)" \
   [ "$(g log --first-parent --format=%p -n 3 main | awk 'NF == 2' | wc -l | tr -d ' ')" -eq 3 ]
 check "queue is empty afterwards" [ -z "$("$QUEUE" -r "$R" list)" ]
 
-# concurrency: 8 submitters at once get 8 distinct numbers
 new_repo
 for i in 1 2 3 4 5 6 7 8; do branch "p$i" "p$i.txt" "$i"; done
 for i in 1 2 3 4 5 6 7 8; do "$QUEUE" -r "$R" submit "p$i" >"$TD/sub.$i" 2>&1 & done
@@ -63,7 +57,6 @@ order_q=$(g log --first-parent --reverse --format=%s main | sed -n 's/^queue #[0
 order_t=$(for i in 1 2 3 4 5 6 7 8; do sed -n "s/^queued #\([0-9]*\) \(.*\)/\1 \2/p" "$TD/sub.$i"; done | sort -n | awk '{printf "%s ", $2}')
 check "merge order equals ticket order" [ "$order_q" = "$order_t" ]
 
-# a red gate rejects the ticket, restores main, and does not block the line
 new_repo
 branch good1 g1.txt ok; branch broken BROKEN x; branch good2 g2.txt ok
 for b in good1 broken good2; do "$QUEUE" -r "$R" submit "$b" >/dev/null; done
@@ -76,7 +69,6 @@ check "the ticket after it is still merged" \
 check "nothing of the broken change is left on main" [ ! -e "$R/BROKEN" ]
 check "working tree is clean after a rejection" [ -z "$(g status --porcelain --untracked-files=no)" ]
 
-# a conflict is a rejection too, and main is untouched
 new_repo
 g checkout -q -b left main; printf 'left\n' >"$R/shared.txt"; g commit -q -am left; g checkout -q main
 g checkout -q -b right main; printf 'right\n' >"$R/shared.txt"; g commit -q -am right; g checkout -q main
@@ -86,7 +78,6 @@ check "the second of two conflicting tickets is rejected" \
   contains "$out" "REJECTED #2 right: merge conflict"
 check "main holds the first ticket's content" [ "$(cat "$R/shared.txt")" = "left" ]
 
-# guards
 new_repo; branch x x.txt x
 "$QUEUE" -r "$R" submit x >/dev/null
 "$QUEUE" -r "$R" submit x >/dev/null 2>&1; rc=$?
@@ -98,7 +89,6 @@ echo dirty >>"$R/shared.txt"
 check "run refuses a tree with uncommitted tracked changes" [ "$rc" -eq 2 ]
 g checkout -q -- shared.txt
 
-# stale queue lock: a submitter that died holding it does not wedge the queue
 new_repo; branch s s.txt s
 L="$(g rev-parse --absolute-git-dir)/drift-queue/locks/queue.lock"
 mkdir -p "$L"
@@ -108,7 +98,6 @@ out=$("$QUEUE" -r "$R" submit s 2>&1); rc=$?
 check "submit recovers a stale queue lock" [ "$rc" -eq 0 ]
 check "... and says so" contains "$out" "recovered stale lock queue"
 
-# crash in the middle of a merge: kill -9 everything while the gate runs
 new_repo; branch slow slow.txt slow
 "$QUEUE" -r "$R" submit slow >/dev/null
 before=$(g rev-parse HEAD)

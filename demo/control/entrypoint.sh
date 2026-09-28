@@ -1,5 +1,4 @@
 #!/bin/sh
-# Copy the throwaway client key with strict permissions, then run the command.
 set -eu
 install -m 600 /keys/client /tmp/client
 DRIFT_SSH_KEY=/tmp/client
